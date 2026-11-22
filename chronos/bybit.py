@@ -31,6 +31,23 @@ def positive(value: object, name: str, allow_zero: bool = False) -> float:
     return result
 
 
+def crypto_underlying(instrument: dict) -> bool:
+    """Exclude identifiable TradFi/xStocks underlyings from the crypto universe.
+
+    Bybit's linear category includes crypto and traditional-market perpetuals.
+    Treat nonempty marketRegion/underlyingTicker as TradFi metadata according to
+    the V5 instruments-info specification. Unclassified instruments remain
+    eligible rather than silently rejecting newly listed crypto tokens.
+    """
+    if str(instrument.get("symbolType") or "").lower() == "xstocks":
+        return False
+    if str(instrument.get("marketRegion") or "").strip():
+        return False
+    if str(instrument.get("underlyingTicker") or "").strip():
+        return False
+    return True
+
+
 class BybitClient:
     def __init__(self, base_url: str = "https://api.bybit.com", timeout: float = 9.0):
         if not base_url.startswith("https://"):
@@ -38,6 +55,7 @@ class BybitClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._instrument_cache: tuple[float, set[str]] | None = None
+        self.excluded_tradfi = 0
 
     def get(self, endpoint: str, **params: object) -> dict:
         if endpoint not in ALLOWED_ENDPOINTS:
@@ -89,18 +107,24 @@ class BybitClient:
             return self._instrument_cache[1]
         cursor: str | None = None
         symbols: set[str] = set()
+        excluded: set[str] = set()
         for _ in range(15):
             data = self.get("/v5/market/instruments-info", category="linear", limit=1000, cursor=cursor)
             for row in data.get("list") or []:
                 if (row.get("quoteCoin") == "USDT" and row.get("status") == "Trading"
                         and row.get("contractType") == "LinearPerpetual"):
-                    symbols.add(str(row.get("symbol")))
+                    symbol = str(row.get("symbol"))
+                    if crypto_underlying(row):
+                        symbols.add(symbol)
+                    else:
+                        excluded.add(symbol)
             new_cursor = data.get("nextPageCursor") or None
             if not new_cursor or new_cursor == cursor:
                 break
             cursor = new_cursor
         if not symbols:
             raise BybitDataError("No active USDT perpetual instruments returned")
+        self.excluded_tradfi = len(excluded)
         self._instrument_cache = (now, symbols)
         return symbols
 

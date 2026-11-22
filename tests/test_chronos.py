@@ -7,7 +7,7 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from chronos.bybit import BybitClient, BybitDataError
+from chronos.bybit import BybitClient, BybitDataError, crypto_underlying
 from chronos.models import Candle, MarketSnapshot
 from chronos.settings import Settings
 from chronos.strategy import evaluate
@@ -99,6 +99,19 @@ class TerminalDiagnosticTests(unittest.TestCase):
         self.assertIn("OI 60m +0.00%", output.getvalue())
         self.assertRegex(output.getvalue(), r"WAIT\s+-\s+open_interest_not_expanding")
 
+    def test_one_shot_output_shows_full_scan_and_wait_reason_counts(self):
+        from chronos.models import Assessment
+        assessments = [Assessment(f"TOKEN{i}USDT", 1800000000000, "WAIT",
+                                  "open_interest_not_expanding", 0.0,
+                                  {"oi_growth_60m": 0.001})
+                       for i in range(30)]
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_result(ScanResult(assessments, [], 0))
+        text = output.getvalue()
+        self.assertIn("TOKEN29USDT", text)
+        self.assertIn("open_interest_not_expanding=30", text)
+
     def test_completed_score_remains_numeric(self):
         a = evaluate(fixture(), Settings())
         self.assertEqual(a.verdict, "SIGNAL")
@@ -134,6 +147,31 @@ class BybitTests(unittest.TestCase):
     def test_https_required(self):
         with self.assertRaises(ValueError):
             BybitClient("http://localhost")
+
+    def test_instrument_tradfi_filter(self):
+        self.assertTrue(crypto_underlying({"symbol": "BTCUSDT", "marketRegion": "", "underlyingTicker": ""}))
+        self.assertFalse(crypto_underlying({"symbol": "NVDAUSDT", "marketRegion": "US"}))
+        self.assertFalse(crypto_underlying({"symbol": "XAUUSDT", "underlyingTicker": "XAU"}))
+        self.assertFalse(crypto_underlying({"symbol": "STOCKUSDT", "symbolType": "xstocks"}))
+        self.assertTrue(crypto_underlying({"symbol": "NEWCOINUSDT"}))
+
+    def test_tradfi_excluded_from_global_ticker_ranking(self):
+        class Fake(BybitClient):
+            def get(self, path, **params):
+                if path.endswith("instruments-info"):
+                    return {"list": [
+                        {"symbol": "BTCUSDT", "quoteCoin": "USDT", "status": "Trading", "contractType": "LinearPerpetual", "marketRegion": "", "underlyingTicker": ""},
+                        {"symbol": "NVDAUSDT", "quoteCoin": "USDT", "status": "Trading", "contractType": "LinearPerpetual", "marketRegion": "US"},
+                        {"symbol": "XAUUSDT", "quoteCoin": "USDT", "status": "Trading", "contractType": "LinearPerpetual", "underlyingTicker": "XAU"},
+                    ]}
+                return {"list": [
+                    {"symbol": "BTCUSDT", "turnover24h": "90000000", "lastPrice": "100", "fundingRate": "0.0001", "nextFundingTime": "1800000000000", "openInterest": "100"},
+                    {"symbol": "NVDAUSDT", "turnover24h": "900000000", "lastPrice": "100", "fundingRate": "0.0001", "nextFundingTime": "1800000000000", "openInterest": "100"},
+                    {"symbol": "XAUUSDT", "turnover24h": "900000000", "lastPrice": "100", "fundingRate": "0.0001", "nextFundingTime": "1800000000000", "openInterest": "100"}
+                ]}
+        client = Fake()
+        self.assertEqual([r["symbol"] for r in client.universe(10)], ["BTCUSDT"])
+        self.assertEqual(client.excluded_tradfi, 2)
 
     def test_universe_ignores_inactive_and_spot(self):
         class Fake(BybitClient):

@@ -9,7 +9,8 @@ The project deliberately contains **no Atlas SMC, indicators-as-strategies, exec
 ## Supported data and decisions
 
 - Public Bybit V5: linear USDT perpetual instruments, 24h tickers, closed 5-minute candles, 5-minute historical OI, historical funding observations, and 50-level order books.
-- Enumerate **global Bybit USDT linear perpetual symbols** from the global API host, rank by 24h turnover and scan a bounded top-N selection (default minimum 24h turnover is 20 million USDT; lower `CHRONOS_MIN_TURNOVER` to include smaller coins).
+- Enumerate **global Bybit USDT crypto linear perpetual symbols** from the global API host, excluding instruments explicitly identified as traditional-market underlyings through V5 `marketRegion`, `underlyingTicker` or `xstocks` metadata; rank by 24h turnover and scan a bounded top-N selection (default minimum 24h turnover is 20 million USDT; lower `CHRONOS_MIN_TURNOVER` to include smaller coins). Instruments without enough classification metadata remain eligible.
+- Show **all symbols analyzed** in one-shot CLI output, plus counts for each WAIT reason. No entry/score thresholds are reduced merely to manufacture signals.
 - Estimate OI expansion vs 60 minutes earlier; **OI is two-sided and does not tell which side opened which trades**.
 - Measure funding magnitude relative to recent funding; consider time until next funding, normalized price stall, and *assumed* partial unwind size relative to nearby depth.
 - Return `WAIT` with a specific reason, or a *research-only* `LONG`/`SHORT` hypothesis with entry reference, stop, target, gross RR, and **estimated net RR including taker fees, half-spread and slippage**.

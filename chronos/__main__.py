@@ -45,7 +45,8 @@ def main() -> int:
         if args.command=="doctor":
             print("CHRONOS | read-only endpoint",cfg.base_url)
             print("Bybit server:",client.get("/v5/market/time"))
-            print("Active perpetual instruments:",len(client.active_symbols()))
+            print("Active crypto USDT perpetual instruments:",len(client.active_symbols()))
+            print("Excluded identified non-crypto perpetuals:",client.excluded_tradfi)
             print("Eligible universe sample:",[x["symbol"] for x in client.universe(5,cfg.min_turnover)])
             print("SQLite:",store.count())
             return 0

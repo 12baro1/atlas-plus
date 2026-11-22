@@ -2,6 +2,7 @@
 from __future__ import annotations
 from datetime import datetime,timezone
 import math
+from collections import Counter
 from .models import Assessment
 
 
@@ -32,7 +33,10 @@ def reason_label(a: Assessment) -> str:
 def print_result(result, counts: dict | None = None):
     print("CHRONOS | Bybit USDT perpetual | PAPER RESEARCH ONLY")
     print(f"Scanned: {len(result.assessments)} | Errors: {len(result.errors)} | New signals: {result.new_signals}")
-    for a in result.assessments[:15]:
+    reasons = Counter(a.reason for a in result.assessments if not a.actionable)
+    if reasons:
+        print("WAIT reasons:", ", ".join(f"{k}={v}" for k, v in reasons.most_common()))
+    for a in result.assessments:
         print(f"{a.symbol:<16} {a.verdict:<7} {score_label(a):>5}  "
               + (f"{a.side:<5} entry {a.entry:.6g} SL {a.stop:.6g} TP {a.target:.6g} netRR {a.net_rr:.2f}"
                  if a.actionable else reason_label(a)))
