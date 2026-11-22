@@ -9,6 +9,7 @@ import statistics
 from dataclasses import replace
 from .diagnostics import inspect_gates
 from .candidates import candidate_setup
+from .conditional import conditional_plan
 from .models import Assessment, MarketSnapshot
 from .settings import Settings
 
@@ -29,10 +30,17 @@ def evaluate(s: MarketSnapshot, cfg: Settings) -> Assessment:
     """
     strict = _evaluate_decision(s, cfg)
     diagnostics = inspect_gates(s, cfg)
-    result = candidate_setup(s, cfg, strict, diagnostics) or strict
+    pressure_plan = candidate_setup(s, cfg, strict, diagnostics)
+    if pressure_plan is not None:
+        result = pressure_plan
+        block = ""
+    else:
+        conditional, block = conditional_plan(s, cfg, strict, diagnostics)
+        result = conditional or strict
     return replace(result, metrics={
         **diagnostics,
         **result.metrics,
+        **({"conditional_blocker": block} if block and strict.verdict=="WAIT" else {}),
     })
 
 

@@ -62,6 +62,14 @@ def print_result(result, counts: dict | None = None):
         print("Conditional checks skipped:", ", ".join(
             f"{k}={v}" for k, v in gate_skips.most_common()
         ))
+    blockers=Counter(
+        a.metrics["conditional_blocker"] for a in result.assessments
+        if a.verdict == "WAIT" and a.metrics.get("conditional_blocker")
+    )
+    if blockers:
+        print("Conditional setup blockers:", ", ".join(
+            f"{k}={v}" for k,v in blockers.most_common()
+        ))
     growth_values = [
         a.metrics["gate_metrics"]["oi_growth_60m"]
         for a in result.assessments
@@ -77,6 +85,7 @@ def print_result(result, counts: dict | None = None):
         print(f"{a.symbol:<16} {a.verdict:<7} {score_label(a):>5}  "
               + (f"{a.side:<5} entry {a.entry:.6g} SL {a.stop:.6g} TP {a.target:.6g} netRR {a.net_rr:.2f}"
                  if a.has_plan else reason_label(a))
+              + (f" [ENTRY TRIGGER: 5m kapanis ile teyit]" if a.has_plan and a.metrics.get("entry_is_trigger") else "")
               + (f" [{a.metrics.get('strict_reject_reason','pending')}; ONAY BEKLIYOR]"
                  if a.verdict in {"SETUP","WATCH"} else ""))
     for error in result.errors[:8]:
@@ -118,14 +127,14 @@ class Dashboard:
         head.add_row("[bold]CHRONOS[/bold] | Bybit V5 | observation-only",
                      f"Scan {self.cycles}  Progress {self.completed}/{self.total}")
         rows=Table(expand=True,show_lines=False)
-        for key in ["Market","Decision","Score","Entry","SL","TP","Net RR / Reason"]:
+        for key in ["Market","Decision","Score","Entry/Trigger","SL","TP","Net RR / Reason"]:
             rows.add_column(key,overflow="ellipsis")
         for a in sorted(self.latest,key=lambda x:({"SIGNAL":3,"SETUP":2,"WATCH":1}.get(x.verdict,0),x.score),reverse=True)[:12]:
             rows.add_row(a.symbol,(a.verdict+" "+a.side if a.has_plan else "WAIT"),score_label(a),
                          f"{a.entry:.5g}" if a.has_plan else "-",
                          f"{a.stop:.5g}" if a.has_plan else "-",
                          f"{a.target:.5g}" if a.has_plan else "-",
-                         f"{a.net_rr:.2f} PENDING" if a.verdict in {"SETUP","WATCH"}
+                         f"{a.net_rr:.2f} {'TRIGGER' if a.metrics.get('entry_is_trigger') else 'PENDING'}" if a.verdict in {"SETUP","WATCH"}
                          else f"{a.net_rr:.2f}" if a.actionable else reason_label(a))
         logs="\n".join(self.logs[-7:]) or "Awaiting observations..."
         return Group(Panel(head,style="cyan"),Panel(rows,title="Pressure observations"),

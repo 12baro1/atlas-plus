@@ -75,9 +75,32 @@ CHRONOS is configured to enumerate **global Bybit V5 USDT linear perpetual contr
 | `python -m chronos research` | Evaluate archived OI distributions and prerequisite cohorts against later **fully archived** 15/60/180-minute gross directional returns; observational, not a backtest |
 | `python -m unittest discover -s tests -v` | Run offline deterministic unit tests |
 
+### Pending trigger plans, funding-clock (not live signals)
+
+When the strict signal and the original early candidate path both reject a market,
+CHRONOS now tests a **second, independently defined conditional plan**:
+the funding-sign side proposes a pending 5-minute closing-price confirmation
+outside the most recent completed 60-minute high/low. This can produce
+`SETUP` or `WATCH` even when OI is flat, falling, or price is moving rather
+than stalled. It DOES NOT assume OI reveals position direction: the funding
+payer side is only a hypothesis, and the trade plan is **not triggered yet**.
+The printed entry is a **future trigger level**, not a market fill or an order.
+Only a future fully closed 5-minute candle beyond that level can supply
+confirmation; current implementation does not upgrade this plan to a
+trade signal or send any order upon a trigger. Candidate stop and target are
+volatility-derived scenarios, and displayed net RR includes approximate fees
+and slippage but does not establish profit probability.
+
+Minimum safety guards (fresh/contiguous OHLCV, live OI baseline, funding history,
+spread, 75k USDT side book depth, turnover, funding expiry) stay active.
+For very small funding or negative after-cost scenarios, output remains WAIT.
+The `Conditional setup blockers` report counts concrete reasons candidate plans
+were declined. Expired or invalidated plans are removed from the current pool
+when their symbol is rescanned.
+
 ### Candidate setup plans (research-only)
 
-`python -m chronos once --limit 30` now ranks **SIGNAL > SETUP > WATCH > WAIT**. Both SETUP and WATCH show a hypothetical LONG/SHORT, entry, stop, target and after-cost RR, but explicitly say **ONAY BEKLIYOR**. They do NOT satisfy the original strict entry criteria. Candidate conditions require fresh consistent closed candles and OI baseline, meaningful funding, positive OI growth (as low as 0.1% for WATCH), a stall, a tight spread, and sufficient observed depth. A SETUP tier additionally requires at least 0.2% 60-minute OI increase, stronger funding and estimated net RR >= 1.0; a WATCH uses net RR >= 0.25. These are **experimental classification criteria**, NOT validated profitable trading rules. The scenarios use recent closed-candle volatility and do not manufacture a 2R target merely to emit more signals. Neither tier is sent to the exchange for execution. Only newly created or changed SETUP-tier candidates are eligible for optional Telegram notices; WATCH is not announced. `python -m chronos report` shows the latest candidate per symbol; candidates are updated or removed as their conditions change.
+`python -m chronos once --limit 30` now ranks **SIGNAL > SETUP > WATCH > WAIT**. Both SETUP and WATCH show a hypothetical LONG/SHORT, entry, stop, target and after-cost RR, but explicitly say **ONAY BEKLIYOR**. They do NOT satisfy the original strict entry criteria. Candidate conditions require fresh consistent closed candles and OI baseline, meaningful funding, positive OI growth (as low as 0.1% for WATCH), a stall, a tight spread, and sufficient observed depth. The separate trigger-plan mode does not require that same OI expansion or stall, but does require a future closed-candle breakout and objective safety checks. A SETUP tier additionally requires at least 0.2% 60-minute OI increase, stronger funding and estimated net RR >= 1.0; a WATCH uses net RR >= 0.25. These are **experimental classification criteria**, NOT validated profitable trading rules. The scenarios use recent closed-candle volatility and do not manufacture a 2R target merely to emit more signals. Neither tier is sent to the exchange for execution. Only newly created or changed SETUP-tier candidates are eligible for optional Telegram notices; WATCH is not announced. `python -m chronos report` shows the latest candidate per symbol; candidates are updated or removed as their conditions change.
 
 ### Signals and trading costs
 
