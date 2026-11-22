@@ -20,7 +20,7 @@ def _int_env(key: str, default: int) -> int:
 
 @dataclass(frozen=True)
 class Settings:
-    base_url: str = "https://api.bybit.tr"
+    base_url: str = "https://api.bybit.com"
     database: str = "chronos.sqlite3"
     scan_limit: int = 20
     interval_seconds: int = 900
@@ -45,7 +45,7 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         s = cls(
-            base_url=os.getenv("CHRONOS_BYBIT_BASE_URL", "https://api.bybit.tr").rstrip("/"),
+            base_url=os.getenv("CHRONOS_BYBIT_BASE_URL", "https://api.bybit.com").rstrip("/"),
             database=os.getenv("CHRONOS_DB", "chronos.sqlite3"),
             scan_limit=_int_env("CHRONOS_SCAN_LIMIT", 20),
             interval_seconds=_int_env("CHRONOS_INTERVAL_SECONDS", 900),

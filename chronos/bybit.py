@@ -32,7 +32,7 @@ def positive(value: object, name: str, allow_zero: bool = False) -> float:
 
 
 class BybitClient:
-    def __init__(self, base_url: str = "https://api.bybit.tr", timeout: float = 9.0):
+    def __init__(self, base_url: str = "https://api.bybit.com", timeout: float = 9.0):
         if not base_url.startswith("https://"):
             raise ValueError("Bybit API base URL must use HTTPS")
         self.base_url = base_url.rstrip("/")
@@ -62,7 +62,18 @@ class BybitClient:
                     raise BybitDataError(f"Bybit API retCode={code}: {message}")
                 return payload["result"]
             except error.HTTPError as exc:
-                last_error = f"HTTP {exc.code} for {endpoint}"
+                last_error = f"HTTP {exc.code} for {endpoint} at {self.base_url}"
+                if exc.code == 404:
+                    raise BybitDataError(
+                        last_error + "; endpoint unavailable on this host. "
+                        "CHRONOS requires Bybit global V5 market data; "
+                        "check CHRONOS_BYBIT_BASE_URL and network access."
+                    ) from exc
+                if exc.code == 403:
+                    raise BybitDataError(
+                        last_error + "; access denied from this network/region. "
+                        "CHRONOS will not silently switch exchange hosts."
+                    ) from exc
                 if exc.code not in {429, 500, 502, 503, 504} or attempt == 2:
                     raise BybitDataError(last_error) from exc
             except (error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:

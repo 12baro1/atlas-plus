@@ -9,7 +9,7 @@ The project deliberately contains **no Atlas SMC, indicators-as-strategies, exec
 ## Supported data and decisions
 
 - Public Bybit V5: linear USDT perpetual instruments, 24h tickers, closed 5-minute candles, 5-minute historical OI, historical funding observations, and 50-level order books.
-- Rank tradable USDT perpetual symbols by 24h turnover; scan a bounded top-N selection.
+- Enumerate **global Bybit USDT linear perpetual symbols** from the global API host, rank by 24h turnover and scan a bounded top-N selection (default minimum 24h turnover is 20 million USDT; lower `CHRONOS_MIN_TURNOVER` to include smaller coins).
 - Estimate OI expansion vs 60 minutes earlier; **OI is two-sided and does not tell which side opened which trades**.
 - Measure funding magnitude relative to recent funding; consider time until next funding, normalized price stall, and *assumed* partial unwind size relative to nearby depth.
 - Return `WAIT` with a specific reason, or a *research-only* `LONG`/`SHORT` hypothesis with entry reference, stop, target, gross RR, and **estimated net RR including taker fees, half-spread and slippage**.
@@ -50,7 +50,7 @@ On Android, UserLAnd/tmux **cannot guarantee uninterrupted background operation*
 Edit `.env.example` for reference; export needed variables in your shell or `source` a locally created and trusted `.env` with `set -a`/`set +a`. Python **does not implicitly execute `.env`**. Never commit a file containing a bot token.
 
 ```bash
-export CHRONOS_BYBIT_BASE_URL=https://api.bybit.tr
+export CHRONOS_BYBIT_BASE_URL=https://api.bybit.com
 export CHRONOS_SCAN_LIMIT=20
 export CHRONOS_DB=$HOME/chronos.sqlite3
 # Optional Telegram one-way signal messages:
@@ -58,7 +58,7 @@ export CHRONOS_TELEGRAM_TOKEN='...'
 export CHRONOS_TELEGRAM_CHAT_ID='...'
 ```
 
-Per [Bybit's official integration guide](https://bybit-exchange.github.io/docs/v5/guide), users registered in Türkiye should use `https://api.bybit.tr`. Other regions may use a different permitted endpoint (e.g. global `https://api.bybit.com`). The code never attempts to bypass regional blocks. `doctor` tests the actual connection; an HTTP 403 means that endpoint is not accessible from that network/account. The public market-data API should not require keys. The code intentionally never calls private endpoints.
+CHRONOS is configured to enumerate **global Bybit V5 USDT linear perpetual contracts** from `https://api.bybit.com`, rather than a Türkiye-specific market selection. This public, read-only endpoint may be inaccessible from some networks or jurisdictions. Per [Bybit's official integration guide](https://bybit-exchange.github.io/docs/v5/guide), Türkiye-account users are assigned a regional host for account API activity; CHRONOS does **not** use that regional host as a fallback because the requested data universe is global. If `doctor` reports HTTP 403 or 404, confirm the actual availability and lawful access of the chosen endpoint from UserLAnd. The code does not attempt to bypass geographic restrictions. The public market-data API should not require keys. The code intentionally never calls private endpoints.
 
 ### Commands
 

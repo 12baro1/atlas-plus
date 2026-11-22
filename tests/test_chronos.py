@@ -84,6 +84,22 @@ class StrategyTests(unittest.TestCase):
 
 
 class BybitTests(unittest.TestCase):
+    def test_global_bybit_default_and_no_regional_fallback(self):
+        self.assertEqual(Settings().base_url, "https://api.bybit.com")
+        with patch.dict("os.environ", {"CHRONOS_BYBIT_BASE_URL": "https://api.bybit.com"}):
+            self.assertEqual(Settings.from_env().base_url, "https://api.bybit.com")
+        self.assertEqual(BybitClient().base_url, "https://api.bybit.com")
+
+    def test_http_404_identifies_host_without_fallback(self):
+        from urllib.error import HTTPError
+        from io import BytesIO
+        with patch("chronos.bybit.request.urlopen", side_effect=HTTPError(
+                "https://api.bybit.com/v5/market/instruments-info",404,"Not Found",{},BytesIO())):
+            with self.assertRaises(BybitDataError) as cm:
+                BybitClient().active_symbols()
+        self.assertIn("api.bybit.com",str(cm.exception))
+        self.assertIn("HTTP 404",str(cm.exception))
+
     def test_private_endpoint_rejected(self):
         with self.assertRaises(ValueError):
             BybitClient().get("/v5/order/create")
