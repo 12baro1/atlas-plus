@@ -104,7 +104,9 @@ class StrategyTests(unittest.TestCase):
         a = evaluate(f, self.cfg)
         self.assertEqual(a.verdict, "WAIT")
         self.assertFalse(a.has_plan)
-        self.assertIn(a.reason, {"insufficient_orderbook_depth", "estimated_unwind_too_small"})
+        # Strict decision can reject at OI before reaching the depth gate.
+        self.assertEqual(a.metrics["gate_checks"]["BOOK_DEPTH"], "FAIL")
+        self.assertEqual(a.reason, "open_interest_not_expanding")
 
     def test_missing_funding_history_blocks(self):
         f=dataclasses.replace(fixture(),funding_history=())
