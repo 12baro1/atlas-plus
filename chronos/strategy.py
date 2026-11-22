@@ -8,6 +8,7 @@ import math
 import statistics
 from dataclasses import replace
 from .diagnostics import inspect_gates
+from .candidates import candidate_setup
 from .models import Assessment, MarketSnapshot
 from .settings import Settings
 
@@ -26,9 +27,11 @@ def evaluate(s: MarketSnapshot, cfg: Settings) -> Assessment:
     The original decision engine remains unchanged; observation-only gate
     checks never permit a trade that the main engine would reject.
     """
-    result = _evaluate_decision(s, cfg)
+    strict = _evaluate_decision(s, cfg)
+    diagnostics = inspect_gates(s, cfg)
+    result = candidate_setup(s, cfg, strict, diagnostics) or strict
     return replace(result, metrics={
-        **inspect_gates(s, cfg),
+        **diagnostics,
         **result.metrics,
     })
 

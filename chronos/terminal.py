@@ -13,7 +13,7 @@ def fmt_time(ms: int) -> str:
 
 def score_label(a: Assessment) -> str:
     """Distinguish an uncomputed pressure score from an actual zero."""
-    if a.actionable or "score_is_calibrated_probability" in a.metrics:
+    if a.has_plan or "score_is_calibrated_probability" in a.metrics:
         return f"{a.score:.1f}"
     return "-"
 
@@ -33,8 +33,13 @@ def reason_label(a: Assessment) -> str:
 
 def print_result(result, counts: dict | None = None):
     print("CHRONOS | Bybit USDT perpetual | PAPER RESEARCH ONLY")
-    print(f"Scanned: {len(result.assessments)} | Errors: {len(result.errors)} | New signals: {result.new_signals}")
-    reasons = Counter(a.reason for a in result.assessments if not a.actionable)
+    verdicts = Counter(a.verdict for a in result.assessments)
+    print(f"Scanned: {len(result.assessments)} | "
+          f"SIGNAL {verdicts['SIGNAL']} | SETUP {verdicts['SETUP']} | "
+          f"WATCH {verdicts['WATCH']} | WAIT {verdicts['WAIT']} | "
+          f"Errors {len(result.errors)} | "
+          f"New signals {result.new_signals} | New candidates {result.new_setups}")
+    reasons = Counter(a.reason for a in result.assessments if a.verdict == "WAIT")
     if reasons:
         print("WAIT reasons:", ", ".join(f"{k}={v}" for k, v in reasons.most_common()))
     # Independent checks can fail in parallel. Conditional checks may be
@@ -71,7 +76,9 @@ def print_result(result, counts: dict | None = None):
     for a in result.assessments:
         print(f"{a.symbol:<16} {a.verdict:<7} {score_label(a):>5}  "
               + (f"{a.side:<5} entry {a.entry:.6g} SL {a.stop:.6g} TP {a.target:.6g} netRR {a.net_rr:.2f}"
-                 if a.actionable else reason_label(a)))
+                 if a.has_plan else reason_label(a))
+              + (f" [{a.metrics.get('strict_reject_reason','pending')}; ONAY BEKLIYOR]"
+                 if a.verdict in {"SETUP","WATCH"} else ""))
     for error in result.errors[:8]:
         print("ERR", error)
     if counts:
@@ -113,12 +120,13 @@ class Dashboard:
         rows=Table(expand=True,show_lines=False)
         for key in ["Market","Decision","Score","Entry","SL","TP","Net RR / Reason"]:
             rows.add_column(key,overflow="ellipsis")
-        for a in sorted(self.latest,key=lambda x:(x.actionable,x.score),reverse=True)[:12]:
-            rows.add_row(a.symbol,a.side if a.actionable else "WAIT",score_label(a),
-                         f"{a.entry:.5g}" if a.actionable else "-",
-                         f"{a.stop:.5g}" if a.actionable else "-",
-                         f"{a.target:.5g}" if a.actionable else "-",
-                         f"{a.net_rr:.2f}" if a.actionable else reason_label(a))
+        for a in sorted(self.latest,key=lambda x:({"SIGNAL":3,"SETUP":2,"WATCH":1}.get(x.verdict,0),x.score),reverse=True)[:12]:
+            rows.add_row(a.symbol,(a.verdict+" "+a.side if a.has_plan else "WAIT"),score_label(a),
+                         f"{a.entry:.5g}" if a.has_plan else "-",
+                         f"{a.stop:.5g}" if a.has_plan else "-",
+                         f"{a.target:.5g}" if a.has_plan else "-",
+                         f"{a.net_rr:.2f} PENDING" if a.verdict in {"SETUP","WATCH"}
+                         else f"{a.net_rr:.2f}" if a.actionable else reason_label(a))
         logs="\n".join(self.logs[-7:]) or "Awaiting observations..."
         return Group(Panel(head,style="cyan"),Panel(rows,title="Pressure observations"),
                      Panel(logs,title="Events"),
@@ -128,7 +136,7 @@ class Dashboard:
         self.completed=completed;self.total=total
         if a:
             self.latest=[x for x in self.latest if x.symbol!=a.symbol]+[a]
-            self.logs.append(f"{a.symbol}: {a.side if a.actionable else reason_label(a)}")
+            self.logs.append(f"{a.symbol}: {(a.verdict+' '+a.side) if a.has_plan else reason_label(a)}")
         if error:
             self.logs.append("ERROR: "+error[:120])
         self.logs=self.logs[-20:]

@@ -49,4 +49,11 @@ class Assessment:
 
     @property
     def actionable(self) -> bool:
+        """Only strict signals; never SETUP/WATCH."""
         return self.verdict == "SIGNAL" and self.side in {"LONG", "SHORT"}
+
+    @property
+    def has_plan(self) -> bool:
+        return (self.verdict in {"SIGNAL", "SETUP", "WATCH"}
+                and self.side in {"LONG", "SHORT"}
+                and self.entry > 0 and self.stop > 0 and self.target > 0)

@@ -34,6 +34,13 @@ def main() -> int:
     try:
         if args.command=="report":
             print("CHRONOS | counts:",store.count())
+            print("ACTIVE CHRONOS CANDIDATES (not trade signals):")
+            for plan in store.recent_candidates(20):
+                print(plan["tier"],plan["symbol"],plan["side"],
+                      "score",plan["score"],"entry",plan["entry"],
+                      "SL",plan["stop"],"TP",plan["target"],
+                      "netRR",plan["net_rr"])
+            print("STRICT HISTORICAL SIGNALS:")
             for row in store.recent_signals(20):
                 print(fmt_time(row["created_ms"]),row["symbol"],row["side"],
                       "score",row["score"],"net RR",row["net_rr"],

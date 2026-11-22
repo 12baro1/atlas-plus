@@ -15,6 +15,7 @@ class ScanResult:
     assessments: list[Assessment]
     errors: list[str]
     new_signals: int
+    new_setups: int = 0
 
 
 def scan_once(client: BybitClient, store: Store, cfg: Settings,
@@ -25,6 +26,7 @@ def scan_once(client: BybitClient, store: Store, cfg: Settings,
     assessments: list[Assessment] = []
     errors = []
     new = 0
+    new_setups = 0
 
     def analyze(ticker):
         snap = client.snapshot(ticker)
@@ -38,8 +40,16 @@ def scan_once(client: BybitClient, store: Store, cfg: Settings,
                 snapshot, assessment = future.result()
                 inserted = store.record(snapshot, assessment)
                 assessments.append(assessment)
+                candidate_changed = False
+                if assessment.verdict in {"SETUP", "WATCH"}:
+                    candidate_changed = store.upsert_candidate(assessment)
+                    if candidate_changed:
+                        new_setups += 1
+                else:
+                    store.clear_candidate(symbol)
                 if inserted:
                     new += 1
+                if inserted or (candidate_changed and assessment.verdict == "SETUP"):
                     try:
                         notify(assessment,cfg)
                     except Exception as exc:
@@ -53,5 +63,8 @@ def scan_once(client: BybitClient, store: Store, cfg: Settings,
                 if progress:
                     progress(len(assessments)+len([e for e in errors if not e.startswith('Telegram')]),
                              len(market), None, message)
-    assessments.sort(key=lambda a: (a.actionable,a.score),reverse=True)
-    return ScanResult(assessments,errors,new)
+    assessments.sort(
+        key=lambda a: ({"SIGNAL":3,"SETUP":2,"WATCH":1}.get(a.verdict,0),a.score),
+        reverse=True,
+    )
+    return ScanResult(assessments,errors,new,new_setups)

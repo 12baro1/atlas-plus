@@ -14,7 +14,7 @@ The project deliberately contains **no Atlas SMC, indicators-as-strategies, exec
 - Use V5 `symbolType` enums (`commodity`, `stock`, `forex`, `ETF`) and known TradFi contract identifiers as fallback to exclude metal, stock and ETF contracts. Bybit may add new asset types, so this is not a certified exhaustive classification. No entry/score thresholds are reduced merely to manufacture signals.
 - Estimate OI expansion vs 60 minutes earlier; **OI is two-sided and does not tell which side opened which trades**.
 - Measure funding magnitude relative to recent funding; consider time until next funding, normalized price stall, and *assumed* partial unwind size relative to nearby depth.
-- Return `WAIT` with a specific reason, or a *research-only* `LONG`/`SHORT` hypothesis with entry reference, stop, target, gross RR, and **estimated net RR including taker fees, half-spread and slippage**.
+- Evaluate the **original strict SIGNAL criteria unchanged**. When these do not pass, a separate **candidate-plan generator** can return `SETUP` (closer to confirmation) or `WATCH` (weaker research candidate) with indicative direction, entry midpoint, volatility-derived stop and scenario target, and estimated net RR. Invalid/stale data, wide spreads, insufficient depth or inconsistent geometry remain `WAIT`. A SETUP or WATCH is **not permission to open a trade**; all candidate plans explicitly require confirmation and are not counted as strict signals.
 - Save all completed candles, assessments and deduplicated signals to SQLite (one new hypothesis per symbol/side/funding event); emit optional one-way Telegram alerts.
 - Keep a compact terminal dashboard. Replay observed signals using **subsequently archived** candle highs/lows, conservative stop-first collisions and next-candle entry/deviation guard.
 
@@ -70,10 +70,14 @@ CHRONOS is configured to enumerate **global Bybit V5 USDT linear perpetual contr
 | `python -m chronos once --limit 20` | Single bounded scan; archive observations |
 | `python -m chronos run --limit 20 --interval 900` | Continuously scan in Rich fullscreen terminal |
 | `python -m chronos run --plain` | Stream readable text without Rich |
-| `python -m chronos report` | List historical signal hypotheses |
+| `python -m chronos report` | Show current pending SETUP/WATCH candidates plus strict historical signal hypotheses |
 | `python -m chronos replay` | Forward-only replay when **future closed bars have been archived** |
 | `python -m chronos research` | Evaluate archived OI distributions and prerequisite cohorts against later **fully archived** 15/60/180-minute gross directional returns; observational, not a backtest |
 | `python -m unittest discover -s tests -v` | Run offline deterministic unit tests |
+
+### Candidate setup plans (research-only)
+
+`python -m chronos once --limit 30` now ranks **SIGNAL > SETUP > WATCH > WAIT**. Both SETUP and WATCH show a hypothetical LONG/SHORT, entry, stop, target and after-cost RR, but explicitly say **ONAY BEKLIYOR**. They do NOT satisfy the original strict entry criteria. Candidate conditions require fresh consistent closed candles and OI baseline, meaningful funding, positive OI growth (as low as 0.1% for WATCH), a stall, a tight spread, and sufficient observed depth. A SETUP tier additionally requires at least 0.2% 60-minute OI increase, stronger funding and estimated net RR >= 1.0; a WATCH uses net RR >= 0.25. These are **experimental classification criteria**, NOT validated profitable trading rules. The scenarios use recent closed-candle volatility and do not manufacture a 2R target merely to emit more signals. Neither tier is sent to the exchange for execution. Only newly created or changed SETUP-tier candidates are eligible for optional Telegram notices; WATCH is not announced. `python -m chronos report` shows the latest candidate per symbol; candidates are updated or removed as their conditions change.
 
 ### Signals and trading costs
 

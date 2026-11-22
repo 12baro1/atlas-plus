@@ -7,9 +7,11 @@ from .settings import Settings
 
 
 def notify(a: Assessment, cfg: Settings) -> None:
-    if not (a.actionable and cfg.telegram_token and cfg.telegram_chat_id):
+    if not ((a.actionable or a.verdict == "SETUP")
+            and cfg.telegram_token and cfg.telegram_chat_id):
         return
-    text = (f"CHRONOS | {a.symbol} {a.side}\n"
+    label = "STRICT SIGNAL" if a.actionable else "SETUP - CONFIRMATION PENDING"
+    text = (f"CHRONOS | {label} | {a.symbol} {a.side}\n"
             f"Pressure score: {a.score:.1f}/100 (not a probability)\n"
             f"Entry reference: {a.entry:.6g}\nSL: {a.stop:.6g} | TP: {a.target:.6g}\n"
             f"Estimated net RR: {a.net_rr:.2f}\n"
