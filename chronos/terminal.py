@@ -1,6 +1,7 @@
 """Single-screen Rich live monitor; readable fallback if Rich is unavailable."""
 from __future__ import annotations
 from datetime import datetime,timezone
+import math
 from .models import Assessment
 
 
@@ -8,13 +9,33 @@ def fmt_time(ms: int) -> str:
     return datetime.fromtimestamp(ms/1000,timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
+def score_label(a: Assessment) -> str:
+    """Distinguish an uncomputed pressure score from an actual zero."""
+    if a.actionable or "score_is_calibrated_probability" in a.metrics:
+        return f"{a.score:.1f}"
+    return "-"
+
+
+def reason_label(a: Assessment) -> str:
+    """Show quantitative context when an early data/strategy gate rejects."""
+    if a.reason == "open_interest_not_expanding":
+        growth = a.metrics.get("oi_growth_60m")
+        if isinstance(growth, (float, int)) and math.isfinite(growth):
+            return f"{a.reason} (OI 60m {growth:+.2%})"
+    if a.reason == "funding_pressure_too_small":
+        funding = a.metrics.get("funding_rate")
+        if isinstance(funding, (float, int)) and math.isfinite(funding):
+            return f"{a.reason} (funding {funding:+.4%})"
+    return a.reason
+
+
 def print_result(result, counts: dict | None = None):
     print("CHRONOS | Bybit USDT perpetual | PAPER RESEARCH ONLY")
     print(f"Scanned: {len(result.assessments)} | Errors: {len(result.errors)} | New signals: {result.new_signals}")
     for a in result.assessments[:15]:
-        print(f"{a.symbol:<16} {a.verdict:<7} {a.score:5.1f}  "
+        print(f"{a.symbol:<16} {a.verdict:<7} {score_label(a):>5}  "
               + (f"{a.side:<5} entry {a.entry:.6g} SL {a.stop:.6g} TP {a.target:.6g} netRR {a.net_rr:.2f}"
-                 if a.actionable else a.reason))
+                 if a.actionable else reason_label(a)))
     for error in result.errors[:8]:
         print("ERR", error)
     if counts:
@@ -57,11 +78,11 @@ class Dashboard:
         for key in ["Market","Decision","Score","Entry","SL","TP","Net RR / Reason"]:
             rows.add_column(key,overflow="ellipsis")
         for a in sorted(self.latest,key=lambda x:(x.actionable,x.score),reverse=True)[:12]:
-            rows.add_row(a.symbol,a.side if a.actionable else "WAIT",f"{a.score:.1f}",
+            rows.add_row(a.symbol,a.side if a.actionable else "WAIT",score_label(a),
                          f"{a.entry:.5g}" if a.actionable else "-",
                          f"{a.stop:.5g}" if a.actionable else "-",
                          f"{a.target:.5g}" if a.actionable else "-",
-                         f"{a.net_rr:.2f}" if a.actionable else a.reason)
+                         f"{a.net_rr:.2f}" if a.actionable else reason_label(a))
         logs="\n".join(self.logs[-7:]) or "Awaiting observations..."
         return Group(Panel(head,style="cyan"),Panel(rows,title="Pressure observations"),
                      Panel(logs,title="Events"),
@@ -71,7 +92,7 @@ class Dashboard:
         self.completed=completed;self.total=total
         if a:
             self.latest=[x for x in self.latest if x.symbol!=a.symbol]+[a]
-            self.logs.append(f"{a.symbol}: {a.side if a.actionable else a.reason}")
+            self.logs.append(f"{a.symbol}: {a.side if a.actionable else reason_label(a)}")
         if error:
             self.logs.append("ERROR: "+error[:120])
         self.logs=self.logs[-20:]

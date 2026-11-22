@@ -1,4 +1,6 @@
 import dataclasses
+import io
+from contextlib import redirect_stdout
 import math
 import tempfile
 import time
@@ -11,6 +13,8 @@ from chronos.settings import Settings
 from chronos.strategy import evaluate
 from chronos.storage import Store
 from chronos.replay import replay_signal, replay_all
+from chronos.scanner import ScanResult
+from chronos.terminal import print_result, score_label, reason_label
 
 
 def fixture(funding=0.001, oi_new=1_000_000, now=1_800_000_000_000):
@@ -81,6 +85,29 @@ class StrategyTests(unittest.TestCase):
         a=evaluate(fixture(),self.cfg)
         self.assertLessEqual(a.score,100)
         self.assertIs(a.metrics["score_is_calibrated_probability"],False)
+
+    
+class TerminalDiagnosticTests(unittest.TestCase):
+    def test_oi_wait_shows_true_growth_and_no_fake_zero_score(self):
+        a = evaluate(fixture(oi_new=700_000), Settings())
+        self.assertEqual(a.reason, "open_interest_not_expanding")
+        self.assertEqual(score_label(a), "-")
+        self.assertIn("OI 60m +0.00%", reason_label(a))
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_result(ScanResult([a], [], 0))
+        self.assertIn("OI 60m +0.00%", output.getvalue())
+        self.assertRegex(output.getvalue(), r"WAIT\\s+-\\s+open_interest_not_expanding")
+
+    def test_completed_score_remains_numeric(self):
+        a = evaluate(fixture(), Settings())
+        self.assertEqual(a.verdict, "SIGNAL")
+        self.assertNotEqual(score_label(a), "-")
+
+    def test_low_funding_wait_has_numeric_diagnostic(self):
+        a = evaluate(fixture(funding=0.000001), Settings())
+        self.assertEqual(score_label(a), "-")
+        self.assertIn("funding +0.0001%", reason_label(a))
 
 
 class BybitTests(unittest.TestCase):
