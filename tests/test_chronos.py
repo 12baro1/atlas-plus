@@ -97,7 +97,7 @@ class TerminalDiagnosticTests(unittest.TestCase):
         with redirect_stdout(output):
             print_result(ScanResult([a], [], 0))
         self.assertIn("OI 60m +0.00%", output.getvalue())
-        self.assertRegex(output.getvalue(), r"WAIT\\s+-\\s+open_interest_not_expanding")
+        self.assertRegex(output.getvalue(), r"WAIT\s+-\s+open_interest_not_expanding")
 
     def test_completed_score_remains_numeric(self):
         a = evaluate(fixture(), Settings())
