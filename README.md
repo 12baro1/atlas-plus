@@ -72,6 +72,7 @@ CHRONOS is configured to enumerate **global Bybit V5 USDT linear perpetual contr
 | `python -m chronos run --plain` | Stream readable text without Rich |
 | `python -m chronos report` | List historical signal hypotheses |
 | `python -m chronos replay` | Forward-only replay when **future closed bars have been archived** |
+| `python -m chronos research` | Evaluate archived OI distributions and prerequisite cohorts against later **fully archived** 15/60/180-minute gross directional returns; observational, not a backtest |
 | `python -m unittest discover -s tests -v` | Run offline deterministic unit tests |
 
 ### Signals and trading costs
@@ -79,6 +80,10 @@ CHRONOS is configured to enumerate **global Bybit V5 USDT linear perpetual contr
 The `score/100` is a **heuristic index, not a probability**. An entry reference is the midpoint of the observed top of book; next-bar fills can differ. A stop is the greater of ATR × 1.25, 0.2% of mid, and 3×spread. The target is an independently calculated volatility/estimated-depth-pressure scenario (not pushed out merely to pass an RR filter). Default trading friction assumes **two taker executions** plus per-leg slippage and half-spread. Fees and funding intervals may differ by contract/VIP status. Funding settlement paid or credited during the hold is **not included** in estimated net RR; it must be modeled before relying on performance results. Note that the first version uses static default cost assumptions, not symbol-specific live fee rates.
 
 The source of directional inference is *funding sign*: positive funding suggests examining potential LONG pressure (SHORT hypothesis); negative funding suggests examining SHORT pressure (LONG hypothesis). Neither is sufficient without OI growth, limited price displacement, proximity to funding, adequate depth and net RR. The assumed unwind fraction (3% of 60-minute OI increase) is a **research parameter, not measured liquidations**.
+
+### Observational research (no parameter fitting or trading)
+
+Run `python -m chronos research` to summarize historic snapshots already stored in SQLite. It compares the *hypothetical funding-payer-unwind direction* at 15/60/180 minutes for all observations and several pre-existing prerequisite cohorts. The outcome requires **every intervening 5-minute bar** in the archive; missing bars remain `NO FORWARD DATA`. It never changes the live engine's thresholds, never replays a missing order book, and never manufactures signals. Returns are hypothetical **gross signed close-to-reference-price changes** and exclude fees, funding cash flow, fill simulation and stop logic; they are not net trading profits. Repeated scans overlap, so these samples are correlated and not valid independent evidence of predictive edge. For actual research, longer archives and walk-forward/out-of-sample evaluation are required.
 
 ### Replay limitations
 

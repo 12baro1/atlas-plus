@@ -13,6 +13,7 @@ from chronos.settings import Settings
 from chronos.strategy import evaluate
 from chronos.storage import Store
 from chronos.replay import replay_signal, replay_all
+from chronos.research import summarize, format_report
 from chronos.scanner import ScanResult
 from chronos.terminal import print_result, score_label, reason_label
 
@@ -314,6 +315,88 @@ class StorageReplayTests(unittest.TestCase):
         summary=replay_all(self.store,self.cfg)
         self.assertEqual(summary["finished"],0)
         self.assertIsNone(summary["win_rate"])
+
+    
+class ResearchTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.store = Store(str(Path(self.temp.name) / "research.sqlite3"))
+
+    def tearDown(self):
+        self.store.close()
+        self.temp.cleanup()
+
+    def record_observation(self, observed_ms, price=100, funding=0.001, growth=0.05):
+        import json
+        with self.store.db:
+            self.store.db.execute(
+                """INSERT INTO observations
+                (symbol, observed_ms, price, funding, oi, verdict, score, reason, metrics_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ("BTCUSDT", observed_ms, price, funding, 1000, "WAIT", 0, "test",
+                 json.dumps({"gate_checks": {"OI_60M": "PASS", "FUNDING": "PASS",
+                         "FUNDING_WINDOW": "PASS", "SPREAD": "PASS",
+                         "BOOK_DEPTH": "PASS", "PRICE_STALL": "PASS"},
+                         "gate_metrics": {"oi_growth_60m": growth}}))
+            )
+
+    def fill_closed_bars(self, observed_ms, horizon_min=15, missing=None):
+        from chronos.research import BAR_MS
+        first = observed_ms // BAR_MS * BAR_MS
+        target = observed_ms + horizon_min * 60_000
+        last = (target - 1) // BAR_MS * BAR_MS
+        with self.store.db:
+            for t in range(first, last + BAR_MS, BAR_MS):
+                if t == missing:
+                    continue
+                self.store.db.execute(
+                    "INSERT INTO candles VALUES (?,?,?,?,?,?,?)",
+                    ("BTCUSDT", t, 100, 101, 98, 99, 100),
+                )
+
+    def test_empty_archive_has_no_invented_outcomes(self):
+        report = summarize(self.store)
+        self.assertEqual(report["observations"], 0)
+        self.assertEqual(report["cohorts"]["all"]["directional_proxies"]["60"]["n"], 0)
+        self.assertIn("NO FORWARD DATA", format_report(report))
+
+    def test_forward_bar_returns_only_after_contiguous_archive(self):
+        observed = 1_800_000_000_000 + 60_000
+        self.record_observation(observed)
+        report = summarize(self.store)
+        self.assertEqual(report["cohorts"]["all"]["directional_proxies"]["15"]["n"], 0)
+        self.fill_closed_bars(observed)
+        report = summarize(self.store)
+        sample = report["cohorts"]["all"]["directional_proxies"]["15"]
+        self.assertEqual(sample["n"], 1)
+        self.assertAlmostEqual(sample["mean_pct"], 1.0)
+        self.assertEqual(sample["positive_pct"], 100.0)
+        self.assertEqual(report["cohorts"]["all_direct_gates"]["observations"], 1)
+        self.assertEqual(report["cohorts"]["all"]["directional_proxies"]["60"]["n"], 0)
+
+    def test_gap_invalidates_horizon_without_fabricating_candles(self):
+        from chronos.research import BAR_MS
+        observed = 1_800_000_000_000 + 60_000
+        self.record_observation(observed)
+        missing = (observed // BAR_MS) * BAR_MS + 2 * BAR_MS
+        self.fill_closed_bars(observed, missing=missing)
+        self.assertEqual(
+            summarize(self.store)["cohorts"]["all"]["directional_proxies"]["15"]["n"],
+            0,
+        )
+
+    def test_old_observations_missing_gate_metadata_not_backfilled(self):
+        import json
+        observed = 1_800_000_000_000 + 60_000
+        with self.store.db:
+            self.store.db.execute(
+                "INSERT INTO observations VALUES (?,?,?,?,?,?,?,?,?)",
+                ("ETHUSDT", observed, 100, 0.001, 1000, "WAIT", 0, "test",
+                 json.dumps({"oi_growth_60m": 0.05}))
+            )
+        report = summarize(self.store)
+        self.assertEqual(report["cohorts"]["oi_ge_3pct"]["observations"], 0)
+        self.assertEqual(report["oi_60m"]["n"], 1)
 
 
 if __name__=="__main__":

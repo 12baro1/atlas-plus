@@ -5,6 +5,7 @@ import json
 import time
 from .bybit import BybitClient, BybitDataError
 from .replay import replay_all
+from .research import summarize, format_report
 from .scanner import scan_once
 from .settings import Settings
 from .storage import Store
@@ -21,6 +22,7 @@ def main() -> int:
     subs.choices["run"].add_argument("--plain",action="store_true",help="No full-screen display")
     subs.add_parser("doctor",help="Check connectivity and storage")
     subs.add_parser("report",help="Read archived signals")
+    subs.add_parser("research",help="Analyze archived OI, gate cohorts and future closed-bar proxy outcomes")
     subs.add_parser("replay",help="Evaluate archived paper signals with later closed bars")
     args=parser.parse_args()
     cfg=Settings.from_env()
@@ -40,6 +42,9 @@ def main() -> int:
         if args.command=="replay":
             result=replay_all(store,cfg)
             print(json.dumps(result,indent=2,ensure_ascii=False))
+            return 0
+        if args.command=="research":
+            print(format_report(summarize(store)))
             return 0
         client=BybitClient(cfg.base_url,cfg.timeout_seconds)
         if args.command=="doctor":
