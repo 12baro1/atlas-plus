@@ -6,6 +6,8 @@ The pressure score is heuristic and is NOT a calibrated probability.
 from __future__ import annotations
 import math
 import statistics
+from dataclasses import replace
+from .diagnostics import inspect_gates
 from .models import Assessment, MarketSnapshot
 from .settings import Settings
 
@@ -19,6 +21,19 @@ def reject(s: MarketSnapshot, reason: str, metrics: dict | None = None, score: f
 
 
 def evaluate(s: MarketSnapshot, cfg: Settings) -> Assessment:
+    """Decision result plus independent gate diagnostics; no exchange I/O.
+
+    The original decision engine remains unchanged; observation-only gate
+    checks never permit a trade that the main engine would reject.
+    """
+    result = _evaluate_decision(s, cfg)
+    return replace(result, metrics={
+        **inspect_gates(s, cfg),
+        **result.metrics,
+    })
+
+
+def _evaluate_decision(s: MarketSnapshot, cfg: Settings) -> Assessment:
     """One deterministic, single-symbol evaluation; no exchange I/O."""
     candles = list(s.candles)
     if (len(candles) < 36 or not math.isfinite(s.price) or s.price <= 0

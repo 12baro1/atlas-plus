@@ -31,15 +31,26 @@ def positive(value: object, name: str, allow_zero: bool = False) -> float:
     return result
 
 
-def crypto_underlying(instrument: dict) -> bool:
-    """Exclude identifiable TradFi/xStocks underlyings from the crypto universe.
+# Known traditional-asset contracts, used only when exchange metadata is absent.
+# Do NOT block gold-backed crypto tokens (e.g. XAUT or PAXG) by substring.
+KNOWN_TRADFI_CONTRACTS = frozenset({
+    "XAUUSDT", "XAGUSDT", "CLUSDT", "NVDAUSDT", "SOXLUSDT",
+})
+TRADFI_SYMBOL_TYPES = frozenset({
+    "commodity", "stock", "forex", "etf", "xstocks", "mstocks",
+})
 
-    Bybit's linear category includes crypto and traditional-market perpetuals.
-    Treat nonempty marketRegion/underlyingTicker as TradFi metadata according to
-    the V5 instruments-info specification. Unclassified instruments remain
-    eligible rather than silently rejecting newly listed crypto tokens.
+
+def crypto_underlying(instrument: dict) -> bool:
+    """Limit the scan to crypto underlyings, retaining new crypto listings.
+
+    Bybit V5 officially separates TradFi via symbolType, marketRegion and
+    underlyingTicker. Some old metal instruments may omit the newer metadata,
+    so exclude a short list of identified underlying contracts as a fallback.
     """
-    if str(instrument.get("symbolType") or "").lower() == "xstocks":
+    symbol = str(instrument.get("symbol") or "").upper().strip()
+    kind = str(instrument.get("symbolType") or "").lower().strip()
+    if kind in TRADFI_SYMBOL_TYPES or symbol in KNOWN_TRADFI_CONTRACTS:
         return False
     if str(instrument.get("marketRegion") or "").strip():
         return False

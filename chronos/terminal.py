@@ -36,6 +36,16 @@ def print_result(result, counts: dict | None = None):
     reasons = Counter(a.reason for a in result.assessments if not a.actionable)
     if reasons:
         print("WAIT reasons:", ", ".join(f"{k}={v}" for k, v in reasons.most_common()))
+    # Independent checks are diagnostics only: more than one can fail/coin.
+    gate_failures = Counter(
+        name for a in result.assessments
+        for name, state in a.metrics.get("gate_checks", {}).items()
+        if state == "FAIL"
+    )
+    if gate_failures:
+        print("Independent gate failures:", ", ".join(
+            f"{k}={v}" for k, v in gate_failures.most_common()
+        ))
     for a in result.assessments:
         print(f"{a.symbol:<16} {a.verdict:<7} {score_label(a):>5}  "
               + (f"{a.side:<5} entry {a.entry:.6g} SL {a.stop:.6g} TP {a.target:.6g} netRR {a.net_rr:.2f}"

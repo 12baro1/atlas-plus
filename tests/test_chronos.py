@@ -112,6 +112,30 @@ class TerminalDiagnosticTests(unittest.TestCase):
         self.assertIn("TOKEN29USDT", text)
         self.assertIn("open_interest_not_expanding=30", text)
 
+    def test_independent_gates_expose_other_failures_after_oi_rejection(self):
+        f = fixture(oi_new=700_000, funding=0.000001)
+        f = dataclasses.replace(f, next_funding_ms=f.observed_ms+240*60_000)
+        assessment = evaluate(f, Settings())
+        self.assertEqual(assessment.reason, "open_interest_not_expanding")
+        checks = assessment.metrics["gate_checks"]
+        self.assertEqual(checks["OI_60M"], "FAIL")
+        self.assertEqual(checks["FUNDING"], "FAIL")
+        self.assertEqual(checks["FUNDING_WINDOW"], "FAIL")
+        self.assertEqual(checks["PRICE_STALL"], "PASS")
+        self.assertTrue(assessment.metrics["gate_diagnostics_only"])
+        self.assertFalse(assessment.actionable)
+
+    def test_independent_gate_failures_in_scan_summary(self):
+        from chronos.models import Assessment
+        a = Assessment("BTCUSDT", 1, "WAIT", "open_interest_not_expanding",
+                       metrics={"gate_checks": {"OI_60M": "FAIL", "FUNDING": "FAIL"}})
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_result(ScanResult([a], [], 0))
+        self.assertIn("Independent gate failures:", output.getvalue())
+        self.assertIn("OI_60M=1", output.getvalue())
+        self.assertIn("FUNDING=1", output.getvalue())
+
     def test_completed_score_remains_numeric(self):
         a = evaluate(fixture(), Settings())
         self.assertEqual(a.verdict, "SIGNAL")
@@ -154,6 +178,18 @@ class BybitTests(unittest.TestCase):
         self.assertFalse(crypto_underlying({"symbol": "XAUUSDT", "underlyingTicker": "XAU"}))
         self.assertFalse(crypto_underlying({"symbol": "STOCKUSDT", "symbolType": "xstocks"}))
         self.assertTrue(crypto_underlying({"symbol": "NEWCOINUSDT"}))
+
+    def test_bybit_enum_types_and_missing_tradfi_metadata(self):
+        for symbol_type in ("commodity", "stock", "forex", "ETF", "xstocks", "mstocks"):
+            with self.subTest(symbol_type=symbol_type):
+                self.assertFalse(crypto_underlying({"symbol": "EXAMPLEUSDT", "symbolType": symbol_type}))
+        for symbol in ("XAUUSDT", "XAGUSDT", "CLUSDT", "NVDAUSDT", "SOXLUSDT"):
+            with self.subTest(symbol=symbol):
+                self.assertFalse(crypto_underlying({"symbol": symbol}))
+        for symbol in ("XAUTUSDT", "PAXGUSDT", "BTCUSDT", "ETHUSDT"):
+            with self.subTest(symbol=symbol):
+                self.assertTrue(crypto_underlying({"symbol": symbol}))
+        self.assertTrue(crypto_underlying({"symbol": "NEWUSDT", "symbolType": "innovation"}))
 
     def test_tradfi_excluded_from_global_ticker_ranking(self):
         class Fake(BybitClient):
