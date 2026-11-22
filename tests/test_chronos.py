@@ -61,9 +61,25 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(evaluate(fixture(funding=0.000001),self.cfg).reason,
                          "funding_pressure_too_small")
 
-    def test_no_oi_expansion_no_signal(self):
-        self.assertEqual(evaluate(fixture(oi_new=700_000),self.cfg).reason,
-                         "open_interest_not_expanding")
+    def test_no_oi_expansion_no_confirmed_signal(self):
+        a = evaluate(fixture(oi_new=700_000), self.cfg)
+        self.assertFalse(a.actionable)
+        self.assertEqual(a.verdict, "WATCH")
+        self.assertEqual(a.metrics["strict_reject_reason"], "open_interest_not_expanding")
+        self.assertTrue(a.metrics["entry_is_trigger"])
+        self.assertLess(a.entry, a.metrics["reference_mid"])
+        self.assertLess(a.target, a.entry)
+        self.assertGreater(a.stop, a.entry)
+
+    def test_oi_contraction_conditional_plan_can_be_setup(self):
+        a = evaluate(fixture(oi_new=650_000), self.cfg)
+        self.assertEqual(a.verdict, "SETUP")
+        self.assertEqual(a.reason, "conditional_funding_breakout_not_triggered")
+        self.assertFalse(a.actionable)
+        self.assertTrue(a.has_plan)
+        self.assertEqual(a.metrics["candidate_mode"], "FUNDING_CLOCK_TRIGGER")
+        self.assertIn("BELOW", a.metrics["breakout_confirm"])
+        self.assertLess(a.valid_until_ms, a.next_funding_ms+1)
 
     def test_stale_market_data_no_signal(self):
         f=fixture()
@@ -98,6 +114,17 @@ class StrategyTests(unittest.TestCase):
         self.assertTrue(a.has_plan)
         self.assertEqual(a.metrics["candidate_tier"], "WATCH")
 
+    def test_conditional_plan_rejects_stale_or_unsafe_inputs(self):
+        base = fixture(oi_new=700_000)
+        stale = dataclasses.replace(base, observed_ms=base.observed_ms+3_600_000)
+        self.assertEqual(evaluate(stale, self.cfg).verdict, "WAIT")
+        crossed = dataclasses.replace(base, asks=((99.0, 900),))
+        self.assertEqual(evaluate(crossed, self.cfg).verdict, "WAIT")
+        thin = dataclasses.replace(base, bids=((99.99, 5),))
+        self.assertEqual(evaluate(thin, self.cfg).verdict, "WAIT")
+        weak = dataclasses.replace(base, funding_rate=0.000001)
+        self.assertEqual(evaluate(weak, self.cfg).verdict, "WAIT")
+
     def test_unsafe_low_depth_and_crossed_book_not_promoted(self):
         f = fixture(oi_new=714_000)
         f = dataclasses.replace(f, bids=((99.99, 15),), asks=((100.01, 20),))
@@ -120,7 +147,8 @@ class StrategyTests(unittest.TestCase):
     
 class TerminalDiagnosticTests(unittest.TestCase):
     def test_oi_wait_shows_true_growth_and_no_fake_zero_score(self):
-        a = evaluate(fixture(oi_new=700_000), Settings())
+        # Weak funding blocks the conditional-plan fallback, preserving WAIT.
+        a = evaluate(fixture(oi_new=700_000, funding=0.000001), Settings())
         self.assertEqual(a.reason, "open_interest_not_expanding")
         self.assertEqual(score_label(a), "-")
         self.assertIn("OI 60m +0.00%", reason_label(a))
@@ -129,6 +157,16 @@ class TerminalDiagnosticTests(unittest.TestCase):
             print_result(ScanResult([a], [], 0))
         self.assertIn("OI 60m +0.00%", output.getvalue())
         self.assertRegex(output.getvalue(), r"WAIT\s+-\s+open_interest_not_expanding")
+
+    def test_conditional_entry_is_marked_as_pending_trigger(self):
+        a = evaluate(fixture(oi_new=700_000), Settings())
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_result(ScanResult([a], [], 0))
+        text = output.getvalue()
+        self.assertIn("ENTRY TRIGGER: 5m kapanis ile teyit", text)
+        self.assertIn("ONAY BEKLIYOR", text)
+        self.assertIn("New signals 0", text)
 
     def test_one_shot_output_shows_full_scan_and_wait_reason_counts(self):
         from chronos.models import Assessment
@@ -158,7 +196,7 @@ class TerminalDiagnosticTests(unittest.TestCase):
 
     def test_conditional_unwind_not_failed_for_falling_oi(self):
         a = evaluate(fixture(oi_new=650_000), Settings())
-        self.assertEqual(a.reason, "open_interest_not_expanding")
+        self.assertEqual(a.metrics["strict_reject_reason"], "open_interest_not_expanding")
         self.assertEqual(a.metrics["gate_checks"]["OI_60M"], "FAIL")
         self.assertEqual(a.metrics["gate_checks"]["UNWIND_DEPTH"], "SKIP")
         self.assertNotIn("depth_ratio", a.metrics["gate_metrics"])
@@ -374,7 +412,7 @@ class StorageReplayTests(unittest.TestCase):
         )
 
         # Once the market loses qualification, remove the stale setup.
-        invalid_s = fixture(oi_new=700_000)
+        invalid_s = fixture(oi_new=700_000, funding=0.000001)
         invalid = evaluate(invalid_s, self.cfg)
         self.assertEqual(invalid.verdict, "WAIT")
         self.store.record(invalid_s, invalid)
