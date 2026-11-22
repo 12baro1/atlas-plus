@@ -1,8 +1,9 @@
 """Independent, observational gate checks for CHRONOS research.
 
 These checks MUST NOT change the strategy verdict, thresholds or execution.
-They show which independent conditions fail even if the main decision chain
-already returned WAIT. Missing/unreliable inputs are NOT counted as PASS.
+Direct prerequisites are checked independently. The dependent unwind/depth
+check is SKIP (not FAIL) unless all prerequisites pass. Missing or unreliable
+inputs are not counted as PASS.
 """
 from __future__ import annotations
 
@@ -31,6 +32,10 @@ def inspect_gates(s: MarketSnapshot, cfg: Settings) -> dict:
             record("FUNDING_WINDOW", 0 <= minutes <= 180)
             metrics["minutes_to_funding"] = round(minutes, 1)
 
+    # Keep full precision for derived values. Rounding is for display only.
+    oi_now = None
+    oi_base = None
+    oi_growth = None
     if s.open_interest:
         oi = sorted((t, v) for t, v in s.open_interest
                     if isinstance(v, (int, float)) and math.isfinite(v) and v > 0)
@@ -40,6 +45,7 @@ def inspect_gates(s: MarketSnapshot, cfg: Settings) -> dict:
             if old:
                 growth = (latest - old[-1]) / old[-1]
                 if math.isfinite(growth):
+                    oi_now, oi_base, oi_growth = latest, old[-1], growth
                     record("OI_60M", growth >= cfg.min_oi_growth)
                     metrics["oi_growth_60m"] = round(growth, 6)
 
@@ -64,16 +70,22 @@ def inspect_gates(s: MarketSnapshot, cfg: Settings) -> dict:
                 if math.isfinite(depth):
                     record("BOOK_DEPTH", depth >= cfg.min_depth_usdt)
                     metrics["book_exit_depth_usdt"] = round(depth, 2)
-                    growth = metrics.get("oi_growth_60m")
-                    if growth is not None and s.open_interest and depth > 0:
-                        # Use the SAME observed OI baseline as the decision model.
-                        oi_now = max(s.open_interest, key=lambda row: row[0])[1]
-                        if math.isfinite(oi_now) and oi_now > 0:
-                            delta_quote = oi_now * growth / (1+growth) * mid
-                            ratio = delta_quote * cfg.assumed_unwind_fraction / depth
-                            if math.isfinite(ratio):
-                                record("UNWIND_DEPTH", ratio >= cfg.min_depth_ratio)
-                                metrics["depth_ratio"] = round(ratio, 4)
+                    # Dependent gate: unwind/depth is meaningful only AFTER
+                    # the OI expansion, funding, spread and depth prerequisites.
+                    # A falling OI must never be interpreted as negative exits
+                    # that "failed" the liquidity test.
+                    if (checks.get("OI_60M") == "PASS"
+                            and checks.get("FUNDING") == "PASS"
+                            and checks.get("BOOK_DEPTH") == "PASS"
+                            and checks.get("SPREAD") == "PASS"
+                            and oi_now is not None and oi_base is not None
+                            and oi_growth is not None and oi_growth > 0
+                            and depth > 0):
+                        delta_quote = (oi_now - oi_base) * mid
+                        ratio = delta_quote * cfg.assumed_unwind_fraction / depth
+                        if math.isfinite(ratio) and ratio >= 0:
+                            record("UNWIND_DEPTH", ratio >= cfg.min_depth_ratio)
+                            metrics["depth_ratio"] = round(ratio, 4)
         except (ValueError, TypeError, OverflowError, ZeroDivisionError):
             pass
 
@@ -88,6 +100,10 @@ def inspect_gates(s: MarketSnapshot, cfg: Settings) -> dict:
         allowance = max(0.004, vol*0.75)
         record("PRICE_STALL", displacement <= allowance)
         metrics["price_displacement_60m"] = round(displacement, 6)
+
+    # SKIP is not a failure or a pass. It means the prerequisite checks
+    # did not permit a scientifically meaningful conditional measurement.
+    checks.setdefault("UNWIND_DEPTH", "SKIP")
 
     return {
         "gate_checks": checks,

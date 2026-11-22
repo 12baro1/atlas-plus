@@ -125,6 +125,40 @@ class TerminalDiagnosticTests(unittest.TestCase):
         self.assertTrue(assessment.metrics["gate_diagnostics_only"])
         self.assertFalse(assessment.actionable)
 
+    def test_conditional_unwind_not_failed_for_falling_oi(self):
+        a = evaluate(fixture(oi_new=650_000), Settings())
+        self.assertEqual(a.reason, "open_interest_not_expanding")
+        self.assertEqual(a.metrics["gate_checks"]["OI_60M"], "FAIL")
+        self.assertEqual(a.metrics["gate_checks"]["UNWIND_DEPTH"], "SKIP")
+        self.assertNotIn("depth_ratio", a.metrics["gate_metrics"])
+
+    def test_conditional_unwind_not_failed_for_positive_but_low_oi(self):
+        a = evaluate(fixture(oi_new=714_000), Settings())
+        self.assertEqual(a.reason, "open_interest_not_expanding")
+        self.assertEqual(a.metrics["gate_checks"]["UNWIND_DEPTH"], "SKIP")
+
+    def test_conditional_unwind_evaluated_only_after_prerequisites(self):
+        a = evaluate(fixture(), Settings())
+        self.assertEqual(a.metrics["gate_checks"]["UNWIND_DEPTH"], "PASS")
+        self.assertGreater(a.metrics["gate_metrics"]["depth_ratio"], 0)
+
+    def test_conditional_skip_and_oi_distribution_in_cli(self):
+        from chronos.models import Assessment
+        checks = {"OI_60M": "FAIL", "UNWIND_DEPTH": "SKIP"}
+        sample = [
+            Assessment("ONEUSDT", 1, "WAIT", "open_interest_not_expanding",
+                       metrics={"gate_checks": checks, "gate_metrics": {"oi_growth_60m": -0.01}}),
+            Assessment("TWOUSDT", 2, "WAIT", "open_interest_not_expanding",
+                       metrics={"gate_checks": checks, "gate_metrics": {"oi_growth_60m": 0.02}}),
+        ]
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_result(ScanResult(sample, [], 0))
+        result = output.getvalue()
+        self.assertIn("Conditional checks skipped: UNWIND_DEPTH=2", result)
+        self.assertIn("Observed OI 60m: n=2 | median +0.50%", result)
+        self.assertNotIn("UNWIND_DEPTH=2", result.split("Conditional checks skipped:")[0])
+
     def test_independent_gate_failures_in_scan_summary(self):
         from chronos.models import Assessment
         a = Assessment("BTCUSDT", 1, "WAIT", "open_interest_not_expanding",

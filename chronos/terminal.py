@@ -2,6 +2,7 @@
 from __future__ import annotations
 from datetime import datetime,timezone
 import math
+import statistics
 from collections import Counter
 from .models import Assessment
 
@@ -36,15 +37,36 @@ def print_result(result, counts: dict | None = None):
     reasons = Counter(a.reason for a in result.assessments if not a.actionable)
     if reasons:
         print("WAIT reasons:", ", ".join(f"{k}={v}" for k, v in reasons.most_common()))
-    # Independent checks are diagnostics only: more than one can fail/coin.
+    # Independent checks can fail in parallel. Conditional checks may be
+    # skipped until their prerequisites are satisfied (not counted as FAIL).
     gate_failures = Counter(
         name for a in result.assessments
         for name, state in a.metrics.get("gate_checks", {}).items()
         if state == "FAIL"
     )
+    gate_skips = Counter(
+        name for a in result.assessments
+        for name, state in a.metrics.get("gate_checks", {}).items()
+        if state == "SKIP"
+    )
     if gate_failures:
         print("Independent gate failures:", ", ".join(
             f"{k}={v}" for k, v in gate_failures.most_common()
+        ))
+    if gate_skips:
+        print("Conditional checks skipped:", ", ".join(
+            f"{k}={v}" for k, v in gate_skips.most_common()
+        ))
+    growth_values = [
+        a.metrics["gate_metrics"]["oi_growth_60m"]
+        for a in result.assessments
+        if isinstance(a.metrics.get("gate_metrics", {}).get("oi_growth_60m"), (float, int))
+        and math.isfinite(a.metrics["gate_metrics"]["oi_growth_60m"])
+    ]
+    if growth_values:
+        print("Observed OI 60m: n={} | median {:+.2%} | min {:+.2%} | max {:+.2%}".format(
+            len(growth_values), statistics.median(growth_values),
+            min(growth_values), max(growth_values)
         ))
     for a in result.assessments:
         print(f"{a.symbol:<16} {a.verdict:<7} {score_label(a):>5}  "
