@@ -78,6 +78,34 @@ class StrategyTests(unittest.TestCase):
         f=dataclasses.replace(fixture(),asks=((102,900),))
         self.assertEqual(evaluate(f,self.cfg).reason,"spread_or_price_mismatch")
 
+    def test_provisional_setup_has_price_geometry_but_no_execution_rights(self):
+        a = evaluate(fixture(oi_new=714_000), self.cfg)
+        self.assertEqual(a.verdict, "SETUP")
+        self.assertEqual(a.side, "SHORT")
+        self.assertTrue(a.has_plan)
+        self.assertFalse(a.actionable)
+        self.assertGreater(a.stop, a.entry)
+        self.assertLess(a.target, a.entry)
+        self.assertGreaterEqual(a.net_rr, 1.0)
+        self.assertTrue(a.metrics["needs_confirmation"])
+        self.assertFalse(a.metrics["score_is_calibrated_probability"])
+        self.assertEqual(a.metrics["strict_reject_reason"], "open_interest_not_expanding")
+
+    def test_weak_funding_watch_plan_distinct_from_setup(self):
+        a = evaluate(fixture(oi_new=714_000, funding=0.00002), self.cfg)
+        self.assertEqual(a.verdict, "WATCH")
+        self.assertFalse(a.actionable)
+        self.assertTrue(a.has_plan)
+        self.assertEqual(a.metrics["candidate_tier"], "WATCH")
+
+    def test_unsafe_low_depth_and_crossed_book_not_promoted(self):
+        f = fixture(oi_new=714_000)
+        f = dataclasses.replace(f, bids=((99.99, 15),), asks=((100.01, 20),))
+        a = evaluate(f, self.cfg)
+        self.assertEqual(a.verdict, "WAIT")
+        self.assertFalse(a.has_plan)
+        self.assertIn(a.reason, {"insufficient_orderbook_depth", "estimated_unwind_too_small"})
+
     def test_missing_funding_history_blocks(self):
         f=dataclasses.replace(fixture(),funding_history=())
         self.assertEqual(evaluate(f,self.cfg).reason,"insufficient_candles_or_funding_history")
@@ -135,8 +163,12 @@ class TerminalDiagnosticTests(unittest.TestCase):
 
     def test_conditional_unwind_not_failed_for_positive_but_low_oi(self):
         a = evaluate(fixture(oi_new=714_000), Settings())
-        self.assertEqual(a.reason, "open_interest_not_expanding")
+        # The strict signal is rejected; the new provisional plan is separate.
+        self.assertEqual(a.verdict, "SETUP")
+        self.assertEqual(a.metrics["strict_reject_reason"], "open_interest_not_expanding")
         self.assertEqual(a.metrics["gate_checks"]["UNWIND_DEPTH"], "SKIP")
+        self.assertFalse(a.actionable)
+        self.assertTrue(a.has_plan)
 
     def test_conditional_unwind_evaluated_only_after_prerequisites(self):
         a = evaluate(fixture(), Settings())
@@ -315,6 +347,38 @@ class StorageReplayTests(unittest.TestCase):
         summary=replay_all(self.store,self.cfg)
         self.assertEqual(summary["finished"],0)
         self.assertIsNone(summary["win_rate"])
+
+    def test_candidate_lifecycle_replaces_instead_of_adding(self):
+        s = fixture(oi_new=714_000)
+        a = evaluate(s, self.cfg)
+        self.assertEqual(a.verdict, "SETUP")
+        self.assertFalse(self.store.record(s, a))
+        self.assertTrue(self.store.upsert_candidate(a))
+        self.assertFalse(self.store.upsert_candidate(a))
+        self.assertEqual(self.store.count()["signals"], 0)
+        self.assertEqual(self.store.count()["candidates"], 1)
+        current = self.store.recent_candidates(now_ms=s.observed_ms)
+        self.assertEqual(len(current), 1)
+        self.assertEqual(current[0]["tier"], "SETUP")
+        self.assertEqual(current[0]["symbol"], s.symbol)
+
+        # Update a plan for the same funding event in place.
+        changed = dataclasses.replace(a, entry=a.entry+0.1)
+        self.assertFalse(self.store.upsert_candidate(changed))
+        self.assertEqual(self.store.count()["candidates"], 1)
+        self.assertAlmostEqual(
+            self.store.recent_candidates(now_ms=s.observed_ms)[0]["entry"],
+            changed.entry,
+        )
+
+        # Once the market loses qualification, remove the stale setup.
+        invalid_s = fixture(oi_new=700_000)
+        invalid = evaluate(invalid_s, self.cfg)
+        self.assertEqual(invalid.verdict, "WAIT")
+        self.store.record(invalid_s, invalid)
+        self.store.clear_candidate(invalid.symbol)
+        self.assertEqual(self.store.count()["candidates"], 0)
+        self.assertEqual(self.store.count()["signals"], 0)
 
     
 class ResearchTests(unittest.TestCase):
